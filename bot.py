@@ -28,7 +28,13 @@ class StickerBinding(StatesGroup):
 
 
 class StickerKeysInfo(StatesGroup):
-    sticker = State()
+    selection = State()
+
+
+class RemoveSticker(StatesGroup):
+    remove_sticker = State()
+    confirm_removal = State()
+    check_confirm = State()
 
 
 @dp.message_handler(commands=['start', 'help'], state='*')
@@ -51,11 +57,11 @@ async def _(message: types.Message):
 async def _(message: types.Message, state: FSMContext = None):
     if await state.get_state():
         await state.finish()
-    await StickerKeysInfo.sticker.set()
+    await StickerKeysInfo.selection.set()
     await bot.send_message(message.chat.id, 'Отправьте стикер, чтобы получить список ключевых слов и фраз')
 
 
-@dp.message_handler(content_types=ContentType.STICKER, state=StickerKeysInfo.sticker)
+@dp.message_handler(content_types=ContentType.STICKER, state=StickerKeysInfo.selection)
 async def _(message: types.Message, state: FSMContext):
     keys = await db.get_keys(message.from_user.id, message.sticker.file_id)
     await state.finish()
