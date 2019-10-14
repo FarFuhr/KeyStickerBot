@@ -43,3 +43,11 @@ class DatabaseConnection:
             offset
         )
         return [record['file_id'] for record in records]
+
+    async def remove_user_sticker(self, user_id: int, file_id: str) -> List[str]:
+        return await self.__pool.fetchval('''
+            DELETE FROM stickers
+            WHERE user_id = $1 
+            AND file_id = $2 
+            RETURNING keys;
+        ''', user_id, file_id)
