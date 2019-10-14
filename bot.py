@@ -40,32 +40,78 @@ class RemoveSticker(StatesGroup):
 @dp.message_handler(commands=['start', 'help'], state='*')
 async def _(message: types.Message):
     await bot.send_message(
-        chat_id=message.chat.id,
-        text=(
-            f'Я помогу вам сохранять и искать стикеры по ключевым словам и фразам. '
-            f'с моей помощью стикер, Откройте любой чат и введите "@{(await bot.me).username} <запрос>"\n\n'
-            f'Доступные команды:\n'
-            f'/add, /bind — привязать стикер к ключевым словам и/или фразам. В случае, если стикер уже был сохранён, '
-            f'список ключей можно заменить или дополнить\n'
-            # TODO: f'/remove — удалить стикер\n'
-            f'/info — получить список ключей для стикера\n'
-        )
+        message.chat.id,
+        f'Я помогу вам сохранять и искать стикеры по ключевым словам и фразам. '
+        f'с моей помощью стикер, Откройте любой чат и введите "@{(await bot.me).username} <запрос>"\n\n'
+        f'Доступные команды:\n'
+        f'/add, /bind — привязать стикер к ключевым словам и/или фразам. В случае, если стикер уже был сохранён, '
+        f'список ключей можно заменить или дополнить\n'
+        f'/remove — удалить стикер\n'
+        f'/info — получить список ключей для стикера\n'
+        f'/cancel — прекратить текущую операцию'
     )
+
+
+async def check_and_finish(state: FSMContext) -> bool:
+    if state and await state.get_state():
+        await state.finish()
+        return True
+    return False
+
+
+@dp.message_handler(commands=['remove'], state='*')
+async def _(message: types.Message, state: FSMContext = None):
+    await check_and_finish(state)
+    await RemoveSticker.remove_sticker.set()
+    await bot.send_message(message.chat.id, 'Отправьте стикер, который хотите удалить из моей базы')
+
+
+@dp.message_handler(content_types=ContentType.STICKER, state=RemoveSticker.remove_sticker)
+async def _(message: types.Message, state: FSMContext):
+    await state.update_data(file_id=message.sticker.file_id)
+    await RemoveSticker.next()
+    await bot.send_message(
+        message.chat.id,
+        'Вы уверены?',
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
+            types.InlineKeyboardButton('Да',     callback_data='confirm_removal'),
+            types.InlineKeyboardButton('Отмена', callback_data='cancel')
+        ]])
+    )
+
+
+@dp.callback_query_handler(lambda q: q.data == 'confirm_removal', state=RemoveSticker.confirm_removal)
+async def _(query: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    await state.finish()
+    await query.message.delete_reply_markup()
+    if await db.remove_user_sticker(query.message.chat.id, data['file_id']):
+        await bot.send_message(query.message.chat.id, 'Успешно удалено')
+    else:
+        await bot.send_message(query.message.chat.id, 'Произошла неизвестная ошибка. Попробуйте снова')
 
 
 @dp.message_handler(commands=['info'], state='*')
 async def _(message: types.Message, state: FSMContext = None):
-    if await state.get_state():
-        await state.finish()
-    await StickerKeysInfo.selection.set()
+    await check_and_finish(state)
+    await StickerKeysInfo.next()
     await bot.send_message(message.chat.id, 'Отправьте стикер, чтобы получить список ключевых слов и фраз')
 
 
 @dp.message_handler(content_types=ContentType.STICKER, state=StickerKeysInfo.selection)
 async def _(message: types.Message, state: FSMContext):
     keys = await db.get_keys(message.from_user.id, message.sticker.file_id)
-    await state.finish()
     if keys:
+        keys_str = "\n".join(keys)
+        await bot.send_message(
+            message.chat.id,
+            'Для выбранного стикера сохранены следующие ключи:'
+        )
+        while len(keys_str) > 4096:
+            await bot.send_message(message.chat.id, keys_str[:4096])
+            keys_str = keys_str[4096:]
+        await bot.send_message(message.chat.id, keys_str)
+        await state.finish()
         await bot.send_message(message.chat.id, 'Список ключей:')
         await bot.send_message(message.chat.id, '\n'.join(keys))
     else:
@@ -74,8 +120,7 @@ async def _(message: types.Message, state: FSMContext):
 
 @dp.message_handler(commands=['cancel'], state='*')
 async def _(message: types.Message, state: FSMContext = None):
-    if await state.get_state():
-        await state.finish()
+    if await check_and_finish(state):
         await bot.send_message(message.chat.id, 'Отменено')
     else:
         await bot.send_message(message.chat.id, 'Нет начатых действий')
@@ -83,8 +128,7 @@ async def _(message: types.Message, state: FSMContext = None):
 
 @dp.message_handler(commands=['add', 'bind'], state='*')
 async def _(message: types.Message, state: FSMContext = None):
-    if await state.get_state():
-        await state.finish()
+    await check_and_finish(state)
     await StickerBinding.sticker.set()
     await bot.send_message(message.chat.id, 'Отправьте мне стикер, к которому хотите привязать ключевые слова')
 
@@ -141,8 +185,7 @@ async def _(query: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query_handler(lambda q: q.data is 'cancel', state='*')
 async def _(query: types.CallbackQuery, state: FSMContext = None):
-    if await state.get_state():
-        await state.finish()
+    await check_and_finish(state)
     await query.message.delete_reply_markup()
     await query.answer('Отменено')
     await bot.send_message(query.message.chat.id, 'Отменено')
