@@ -112,8 +112,6 @@ async def _(message: types.Message, state: FSMContext):
             keys_str = keys_str[4096:]
         await bot.send_message(message.chat.id, keys_str)
         await state.finish()
-        await bot.send_message(message.chat.id, 'Список ключей:')
-        await bot.send_message(message.chat.id, '\n'.join(keys))
     else:
         await bot.send_message(message.chat.id, 'Записей не найдено')
 
